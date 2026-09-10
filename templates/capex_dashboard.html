@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Capex | Projects Dashboard</title>
+  <link href="{{ url_for('static', filename='vendor/bootstrap.min.css') }}" rel="stylesheet">
+  <link href="{{ url_for('static', filename='vendor/bootstrap-icons/font/bootstrap-icons.min.css') }}" rel="stylesheet">
+  <link href="{{ url_for('static', filename='capex.css') }}" rel="stylesheet">
+</head>
+<body class="capex-body">
+<div class="capex-shell">
+  {% include "_capex_sidebar.html" %}
+
+  <main class="capex-main">
+    <header class="capex-topbar">
+      <h1>Projects Dashboard</h1>
+      <div class="topbar-tools">
+        <div class="search-box">
+          <i class="bi bi-search"></i>
+          <input id="searchInput" type="search" placeholder="Search project, custodian..." aria-label="Search projects">
+        </div>
+        <select id="custodianFilter" class="capex-select" aria-label="Filter by custodian">
+          <option value="">All Custodians</option>
+          {% for custodian in custodians %}<option value="{{ custodian }}">{{ custodian }}</option>{% endfor %}
+        </select>
+        <select id="statusFilter" class="capex-select" aria-label="Filter by status">
+          <option value="">All Status</option>
+          {% for stage in stages %}<option value="{{ stage }}">{{ stage }}</option>{% endfor %}
+        </select>
+        <button class="btn btn-add-project" type="button" id="addProjectButton">
+          <i class="bi bi-plus-lg"></i> Add Project
+        </button>
+        <a class="btn btn-export" href="{{ url_for('export_projects') }}"><i class="bi bi-download"></i> Export</a>
+      </div>
+    </header>
+
+    <section class="stat-row" id="statRow">
+      <article class="stat-card">
+        <span class="stat-icon icon-blue"><i class="bi bi-briefcase"></i></span>
+        <div><span class="stat-label">Total Projects</span><strong data-stat="total">0</strong></div>
+      </article>
+      {% for stage in stages %}
+      <article class="stat-card">
+        <span class="stat-icon icon-{{ stage|lower }}"><i class="bi bi-{{ {'Initiation':'box-seam','Planning':'compass','Execution':'person-gear','Monitoring':'display','Closure':'check-circle'}[stage] }}"></i></span>
+        <div><span class="stat-label">{{ stage }}</span><strong data-stat="{{ stage }}">0</strong></div>
+      </article>
+      {% endfor %}
+    </section>
+
+    <section class="money-row">
+      <article class="money-card"><span>BP-26 INR (MINR)</span><strong data-money="BP-26 INR">₹ 0.00</strong></article>
+      <article class="money-card"><span>Approved Budget (MINR)</span><strong data-money="Approved Budget">₹ 0.00</strong></article>
+      <article class="money-card"><span>Ordered (MINR)</span><strong data-money="Ordered">₹ 0.00</strong></article>
+      <article class="money-card"><span>Balance (MINR)</span><strong data-money="Balance">₹ 0.00</strong></article>
+      <article class="money-card saving"><span>Variance (MINR)</span><strong data-money="Saving">₹ 0.00</strong></article>
+    </section>
+
+    <section class="table-card">
+      <div class="table-responsive">
+        <table class="capex-table">
+          <thead>
+            <tr>
+              <th>Sr.No.</th>
+              <th>Project / equipment / investment</th>
+              <th>Custodian</th>
+              <th class="num">BP-26 INR (MINR)</th>
+              <th class="num">Approved Budget (MINR)</th>
+              <th class="num">Ordered (MINR)</th>
+              <th class="num">Balance (MINR)</th>
+              <th class="num">Variance (MINR)</th>
+              <th class="center">Status</th>
+              <th class="center">Action</th>
+            </tr>
+          </thead>
+          <tbody id="projectRows"></tbody>
+        </table>
+      </div>
+      <div class="table-foot">
+        <span id="rangeLabel"></span>
+        <nav class="pager" id="pager" aria-label="Pagination"></nav>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="modal-backdrop-custom" id="addProjectModal" hidden>
+  <section class="add-project-dialog" role="dialog" aria-modal="true" aria-labelledby="addProjectTitle">
+    <div class="modal-head">
+      <h2 id="addProjectTitle">Add Project</h2>
+      <button type="button" class="btn-icon" id="closeAddProject" aria-label="Close">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </div>
+
+    <form id="addProjectForm" class="add-project-form">
+      <label>Project / equipment / investment
+        <input name="Project/Equipment/Investment" required>
+      </label>
+
+      <label>Custodian
+  <select name="Custodian" required>
+    <option value="">Select Custodian</option>
+    {% for custodian in add_project_custodians %}
+    <option value="{{ custodian }}">{{ custodian }}</option>
+    {% endfor %}
+  </select>
+</label>
+
+      <label>BP-26 INR (MINR)
+        <input name="BP-26 INR" type="number" step="0.01" value="0">
+      </label>
+
+      <label>Approved Budget (MINR)
+        <input name="Approved Budget" type="number" step="0.01" value="0">
+      </label>
+
+      <label>Ordered (MINR)
+        <input name="Ordered" type="number" step="0.01" value="0">
+      </label>
+
+      <label>Status
+        <select name="Planning Status">
+          {% for stage in stages %}
+          <option value="{{ stage }}">{{ stage }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label>Vendor
+        <input name="Vendor">
+      </label>
+
+      <label>Remarks
+        <input name="Remarks">
+      </label>
+
+      <p class="save-note" id="addProjectNote" role="status"></p>
+
+      <div class="modal-actions">
+        <button class="btn btn-cancel" type="button" id="cancelAddProject">Cancel</button>
+        <button class="btn btn-save" type="submit">Save</button>
+      </div>
+    </form>
+  </section>
+</div>
+
+<script id="projectData" type="application/json">{{ projects|tojson }}</script>
+<script>window.CAPEX_DETAIL_URL = "{{ url_for('project_detail', sr_no=0) }}";</script>
+<script src="{{ url_for('static', filename='capex-dashboard.js') }}"></script>
+</body>
+</html>

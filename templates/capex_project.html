@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Capex | {{ project['Project/Equipment/Investment'] }}</title>
+  <link href="{{ url_for('static', filename='vendor/bootstrap.min.css') }}" rel="stylesheet">
+  <link href="{{ url_for('static', filename='vendor/bootstrap-icons/font/bootstrap-icons.min.css') }}" rel="stylesheet">
+  <link href="{{ url_for('static', filename='capex.css') }}" rel="stylesheet">
+</head>
+<body class="capex-body">
+{% set groups = [
+  ['Quotation Date', 'Quotation Value', 'Sourcing Request No.', 'RBGA Work-on No. for Budget', 'MI No.'],
+  ['PO No.', 'PO Value (MINR)', 'Vendor', 'Vendor Code', 'Material Delivery plan date'],
+  ['Material Delivery Actual date', 'Execution Start', 'Execution End', 'Actual Fulfillment Value', 'Ordering'],
+  ['Fullfillment', 'Commitment to EM', 'Status', 'Remarks']
+] %}
+{% set choices = {'Ordering': ordering_options, 'Fullfillment': fulfillment_options, 'Status': status_options} %}
+
+{% macro field(name) %}
+  {% set value = project[name] %}
+  <div class="info-item" data-field="{{ name }}">
+    <span class="info-label">{{ name }}</span>
+    <span class="info-value" data-role="value">
+      {%- if name in numeric_columns -%}₹ {{ '%.2f'|format(value) }}
+      {%- elif value -%}{{ value }}
+      {%- else -%}&ndash;{%- endif -%}
+    </span>
+    {% if name in choices %}
+      <select class="info-input" data-role="input" name="{{ name }}" aria-label="{{ name }}">
+        {% for option in choices[name] %}<option value="{{ option }}" {{ 'selected' if option == value }}>{{ option }}</option>{% endfor %}
+      </select>
+    {% elif name in date_columns %}
+      <input class="info-input" data-role="input" type="date" name="{{ name }}" value="{{ value }}" aria-label="{{ name }}">
+    {% elif name in numeric_columns %}
+      <input class="info-input" data-role="input" type="number" step="0.01" name="{{ name }}" value="{{ '%.2f'|format(value) }}" aria-label="{{ name }}">
+    {% else %}
+      <input class="info-input" data-role="input" type="text" name="{{ name }}" value="{{ value }}" aria-label="{{ name }}">
+    {% endif %}
+  </div>
+{% endmacro %}
+
+<div class="capex-shell">
+  {% include "_capex_sidebar.html" %}
+
+  <main class="capex-main" id="detailMain" data-sr="{{ project['Sr.No.'] }}">
+    <a class="back-link" href="{{ url_for('dashboard') }}"><i class="bi bi-arrow-left"></i> Back to Dashboard</a>
+    <div class="detail-heading">
+      <h1 class="detail-title">Project Details</h1>
+      <div class="edit-actions">
+        <button class="btn btn-edit" type="button" id="editButton"><i class="bi bi-pencil-square"></i> Edit Project</button>
+        <button class="btn btn-save" type="button" id="saveButton"><i class="bi bi-check2"></i> Save Project</button>
+        <button class="btn btn-cancel" type="button" id="cancelButton">Cancel</button>
+      </div>
+    </div>
+
+    <div class="detail-grid">
+      <div class="detail-left">
+        <section class="panel summary-panel">
+          <span class="summary-icon"><i class="bi bi-briefcase-fill"></i></span>
+          <div class="summary-body">
+            <h2 data-role="title">{{ project['Project/Equipment/Investment'] }}</h2>
+            <input class="info-input title-input" data-role="input" name="Project/Equipment/Investment" value="{{ project['Project/Equipment/Investment'] }}" aria-label="Project name">
+            <div class="summary-metrics">
+              <div class="metric custodian">
+                <span>Custodian</span>
+                <strong data-role="value">{{ project['Custodian'] }}</strong>
+                <input class="info-input" data-role="input" name="Custodian" value="{{ project['Custodian'] }}" aria-label="Custodian">
+              </div>
+              <div class="metric">
+                <span>BP-26 INR (MINR)</span>
+                <strong data-money="BP-26 INR">₹ {{ '%.2f'|format(project['BP-26 INR']) }}</strong>
+                <input class="info-input" data-role="input" type="number" step="0.01" name="BP-26 INR" value="{{ '%.2f'|format(project['BP-26 INR']) }}" aria-label="BP-26 INR">
+              </div>
+              <div class="metric">
+                <span>Approved Budget (MINR)</span>
+                <strong data-money="Approved Budget">₹ {{ '%.2f'|format(project['Approved Budget']) }}</strong>
+                <input class="info-input" data-role="input" type="number" step="0.01" name="Approved Budget" value="{{ '%.2f'|format(project['Approved Budget']) }}" aria-label="Approved Budget">
+              </div>
+              <div class="metric">
+                <span>Ordered (MINR)</span>
+                <strong data-money="Ordered">₹ {{ '%.2f'|format(project['Ordered']) }}</strong>
+                <input class="info-input" data-role="input" type="number" step="0.01" name="Ordered" value="{{ '%.2f'|format(project['Ordered']) }}" aria-label="Ordered">
+              </div>
+              <div class="metric">
+                <span>Balance (MINR)</span>
+                <strong data-money="Balance">₹ {{ '%.2f'|format(project['Balance']) }}</strong>
+              </div>
+            </div>
+          </div>
+          <div class="summary-status">
+            <span class="status-caption">Current Status</span>
+            <span class="badge-status stage-{{ project['Planning Status']|lower }}" data-role="stage-badge">{{ project['Planning Status'] }}</span>
+            <select class="info-input" data-role="input" name="Planning Status" aria-label="Planning Status">
+              {% for stage in stages %}<option value="{{ stage }}" {{ 'selected' if stage == project['Planning Status'] }}>{{ stage }}</option>{% endfor %}
+            </select>
+            <span class="status-caption mt">Saving (MINR)</span>
+            <strong class="saving-value" data-money="Saving">₹ {{ '%.2f'|format(project['Saving']) }}</strong>
+          </div>
+        </section>
+
+        <section class="panel lifecycle-panel">
+          <h3>Project Management Lifecycle</h3>
+          <ol class="lifecycle" id="lifecycle">
+            {% for step in timeline %}
+            <li class="lifecycle-step state-{{ step.state|lower|replace(' ', '-') }}">
+              <span class="step-mark">
+                {% if step.state == 'Completed' %}<i class="bi bi-check-circle-fill"></i>{% else %}<i class="bi bi-circle"></i>{% endif %}
+              </span>
+              <span class="step-name">{{ step.index }}. {{ step.stage }}</span>
+              <span class="step-state">{{ step.state }}</span>
+              <span class="step-date">
+                {%- if step.state == 'Completed' -%}{{ step.date or step.planned }}
+                {%- elif step.state == 'In Progress' -%}Start: {{ step.date or step.planned }}
+                {%- else -%}Planned Start: {{ step.planned or '&ndash;' }}{%- endif -%}
+              </span>
+            </li>
+            {% endfor %}
+          </ol>
+          <div class="lifecycle-date-panel" id="lifecycleDatePanel" hidden>
+            <label><span id="previousStageLabel">Previous State Closed Date</span>
+              <input type="date" id="previousClosedDate">
+            </label>
+            <label><span id="currentStageLabel">Current State Start Date</span>
+              <input type="date" id="currentStartDate">
+            </label>
+          </div>
+        </section>
+
+        <section class="panel info-panel">
+          <div class="panel-head">
+            <h3>Project Information</h3>
+            <div class="multiple-actions">
+              <button class="btn btn-edit" type="button" id="addMultipleRowButton"><i class="bi bi-plus-lg"></i> Add PO Details</button>
+              <button class="btn btn-save" type="button" id="saveMultipleButton"><i class="bi bi-check2"></i> Save</button>
+            </div>
+          </div>
+          <div class="multiple-rows" id="multipleRows"></div>
+          <p class="save-note" id="multipleSaveNote" role="status"></p>
+          <div class="attachment-panel">
+            <div class="attachment-head">
+              <h4>Attachments</h4>
+              <label class="btn btn-edit attachment-picker">Attach Files
+                <input type="file" id="attachmentInput" multiple>
+              </label>
+            </div>
+            <ul class="attachment-list" id="attachmentList"></ul>
+            <p class="save-note" id="attachmentNote" role="status"></p>
+          </div>
+        </section>
+      </div>
+
+      <aside class="detail-right">
+        <div class="panel updated-panel">
+          <span>Last Updated</span>
+          <strong id="lastUpdated">{{ comments[-1].created_at.split(' ')[0] if comments else '&ndash;'|safe }}</strong>
+        </div>
+        <div class="panel comments-panel">
+          <h3>Comments</h3>
+          <textarea id="commentInput" rows="3" placeholder="Write your comment..." maxlength="2000"></textarea>
+          <button class="btn btn-comment" type="button" id="addCommentButton">Add Comment</button>
+          <ul class="comment-list" id="commentList"></ul>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+
+<script id="multipleData" type="application/json">{{ multiple_rows|tojson }}</script>
+<script id="multipleColumns" type="application/json">{{ multiple_columns|tojson }}</script>
+<script id="attachmentData" type="application/json">{{ attachments|tojson }}</script>
+<script id="commentData" type="application/json">{{ comments|tojson }}</script>
+<script id="detailConfig" type="application/json">{{ {'user': user.name, 'is_admin': user.role == 'admin', 'options': {'Ordering': ordering_options, 'Fullfillment': fulfillment_options, 'Status': status_options}}|tojson }}</script>
+<script src="{{ url_for('static', filename='capex-detail.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+<aside class="capex-sidebar" id="capexSidebar">
+  <div class="brand">
+    <img src="{{ url_for('static', filename='Bosch_symbol_logo_white_red.svg') }}" alt="Bosch">
+    <span>Project Dashboard</span>
+  </div>
+  <nav class="side-nav">
+    <a class="{{ 'active' if active_nav|default('dashboard') == 'dashboard' }}" href="{{ url_for('dashboard') }}"><i class="bi bi-grid-1x2"></i><span>Dashboard</span></a>
+    <!--a class="{{ 'active' if active_nav|default('') == 'projects' }}" href="{{ url_for('dashboard') }}"><i class="bi bi-folder"></i><span>Projects</span></a-->
+    <a href="{{ url_for('export_projects') }}"><i class="bi bi-bar-chart"></i><span>Reports</span></a>
+  </nav>
+  <div class="side-foot">
+    <div class="side-user">
+      <span class="avatar">{{ user.name.split()|map('first')|join|upper }}</span>
+      <div>
+        <strong>{{ user.name }}</strong>
+        <small>{{ user.role|title }}</small>
+      </div>
+    </div>
+    <form method="post" action="{{ url_for('logout') }}">
+      <button class="btn-signout" type="submit"><i class="bi bi-box-arrow-left"></i><span>Sign out</span></button>
+    </form>
+  </div>
+</aside>
