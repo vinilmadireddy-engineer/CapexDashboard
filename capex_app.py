@@ -92,6 +92,15 @@ DERIVED_COLUMNS = ["Balance", "Saving"]
 READONLY_COLUMNS = [KEY] + DERIVED_COLUMNS
 
 STAGES = ["Initiation", "Planning", "Execution", "Monitoring", "Closure"]
+STAGE_DESCRIPTIONS = {
+    "Initiation": "Site Survey\nMeeting with Stakeholders\nQuotation received\nIsourcing raised\nProject Justification\nRBGA work ON",
+    "Planning": "PO release\nProject Plan with the scope and schedule\nRisk identification\nMaterial delivery\nMaterial GRN",
+    "Execution": "Project Execution as per the plan\nCoordinate with stakeholders and vendors\nInstallation/Configuration/Commissioning\nProject deliverables",
+    "Monitoring": "Track project progress against scope, schedule, quality and milestone\nManage risks, issues, changes, dependencies and corrective action",
+    "Closure": "Complete testing and acceptance of the projects\nhandover deliverables\nsnag points/lessons learned\nfinalize and review project documents\nProject handover documents",
+}
+LIFECYCLE_COLUMNS = [KEY, "Stage", "Planned Start", "Planned End", "Actual Start", "Actual End"]
+LIFECYCLE_DATE_COLUMNS = LIFECYCLE_COLUMNS[2:]
 ORDERING_OPTIONS = ["Not Started", "In Progress", "Completed"]
 FULFILLMENT_OPTIONS = ["Pending", "Partial", "Completed"]
 STATUS_OPTIONS = ["On Track", "Delayed", "At Risk", "Completed", "On Hold"]
@@ -160,6 +169,8 @@ def read_all():
 def write_all(book):
     """Atomically replace the workbook, keeping a timestamped backup."""
     with workbook_lock:
+        if SHEET_LIFECYCLE in book:
+            book[SHEET_LIFECYCLE] = normalize_lifecycle_frame(book[SHEET_LIFECYCLE])
         temporary = EXCEL_FILE.with_name(EXCEL_FILE.stem + "_tmp.xlsx")
         with pd.ExcelWriter(temporary, engine="openpyxl") as writer:
             for name, frame in book.items():
@@ -171,20 +182,30 @@ def write_all(book):
         temporary.replace(EXCEL_FILE)
 
 
-def load_projects():
-    frame = read_sheet(SHEET_PROJECTS)
+def load_projects(book=None, aggregate_multiple=True):
+    if book is None:
+        book = read_all()
+    frame = book[SHEET_PROJECTS].copy()
     for column in COLUMNS:
         if column not in frame.columns:
             frame[column] = ""
     frame = frame[COLUMNS].copy()
     frame[KEY] = pd.to_numeric(frame[KEY], errors="coerce").fillna(0).astype(int)
     for column in NUMERIC_COLUMNS:
-        frame[column] = pd.to_numeric(frame[column], errors="coerce").fillna(0.0)
+        frame[column] = pd.to_numeric(frame[column], errors="coerce").fillna(0.0).astype("float64")
     for column in DATE_COLUMNS:
         frame[column] = pd.to_datetime(frame[column], errors="coerce")
     for column in frame.columns:
         if column not in NUMERIC_COLUMNS + DATE_COLUMNS + [KEY]:
             frame[column] = frame[column].fillna("").astype(str).str.strip()
+    if aggregate_multiple:
+        multiple = normalize_multiple_frame(book.get(SHEET_MULTIPLE, pd.DataFrame(columns=MULTIPLE_COLUMNS)))
+        totals = multiple.groupby(KEY)[["PO Value (MINR)", "Actual Fulfillment Value"]].sum()
+        for sr_no, total in totals.iterrows():
+            target = frame.index[frame[KEY] == sr_no]
+            if not target.empty:
+                for column in ["PO Value (MINR)", "Actual Fulfillment Value"]:
+                    frame.at[target[0], column] = total[column]
     return frame
 
 
@@ -296,56 +317,128 @@ def coerce_value(column, value):
     return str(value).strip()
 
 
+def normalize_lifecycle_frame(frame):
+    frame = frame.copy()
+    if "Planned Start" not in frame.columns and "Planned Date" in frame.columns:
+        frame["Planned Start"] = frame["Planned Date"]
+    if "Actual End" not in frame.columns and "Date" in frame.columns:
+        frame["Actual End"] = frame["Date"]
+    for column in LIFECYCLE_COLUMNS:
+        if column not in frame.columns:
+            frame[column] = pd.NaT if column in LIFECYCLE_DATE_COLUMNS else ""
+    frame = frame[LIFECYCLE_COLUMNS].copy()
+    frame[KEY] = pd.to_numeric(frame[KEY], errors="coerce").fillna(0).astype(int)
+    frame["Stage"] = frame["Stage"].fillna("").astype(str).str.strip()
+    for column in LIFECYCLE_DATE_COLUMNS:
+        frame[column] = pd.to_datetime(frame[column], errors="coerce")
+
+    stage_order = {stage: index for index, stage in enumerate(STAGES)}
+    for _, indexes in frame.groupby(KEY).groups.items():
+        ordered = sorted(indexes, key=lambda index: stage_order.get(frame.at[index, "Stage"], len(STAGES)))
+        for position, index in enumerate(ordered):
+            if pd.isna(frame.at[index, "Planned End"]) and not pd.isna(frame.at[index, "Planned Start"]):
+                if position + 1 < len(ordered):
+                    next_start = frame.at[ordered[position + 1], "Planned Start"]
+                    frame.at[index, "Planned End"] = next_start - pd.Timedelta(days=1) if not pd.isna(next_start) else frame.at[index, "Planned Start"] + pd.Timedelta(days=39)
+                else:
+                    frame.at[index, "Planned End"] = frame.at[index, "Planned Start"] + pd.Timedelta(days=39)
+    return frame
+
+
 def lifecycle_for(book, sr_no, stage):
-    frame = book.get(SHEET_LIFECYCLE, pd.DataFrame(columns=[KEY, "Stage", "Date", "Planned Date"]))
+    frame = normalize_lifecycle_frame(book.get(SHEET_LIFECYCLE, pd.DataFrame(columns=LIFECYCLE_COLUMNS)))
+    book[SHEET_LIFECYCLE] = frame
     rows = frame[pd.to_numeric(frame[KEY], errors="coerce") == sr_no] if len(frame) else frame
     dates = {str(row["Stage"]).strip(): row for _, row in rows.iterrows()}
     current = STAGES.index(stage) if stage in STAGES else 0
+    today = pd.Timestamp.now().normalize()
     timeline = []
     for index, name in enumerate(STAGES):
         entry = dates.get(name)
-        actual = as_date_text(pd.to_datetime(entry["Date"], errors="coerce")) if entry is not None else ""
-        planned = as_date_text(pd.to_datetime(entry["Planned Date"], errors="coerce")) if entry is not None else ""
-        if index < current:
+        values = {
+            column: as_date_text(entry[column]) if entry is not None else ""
+            for column in LIFECYCLE_DATE_COLUMNS
+        }
+        actual_start = entry["Actual Start"] if entry is not None else pd.NaT
+        actual_end = entry["Actual End"] if entry is not None else pd.NaT
+        planned_end = entry["Planned End"] if entry is not None else pd.NaT
+        completed = index < current or (not pd.isna(actual_start) and not pd.isna(actual_end))
+        completed_late = completed and not pd.isna(actual_end) and not pd.isna(planned_end) and actual_end.normalize() > planned_end.normalize()
+        past_due = not completed and not pd.isna(planned_end) and planned_end.normalize() <= today
+        if completed_late:
+            state = "Delayed"
+            state_class = "delayed"
+        elif past_due:
+            state = "In Progress (Delayed)" if index == current else "Delayed"
+            state_class = "delayed"
+        elif completed:
             state = "Completed"
+            state_class = "completed"
         elif index == current:
             state = "In Progress"
+            state_class = "in-progress"
         else:
             state = "Not Started"
-        timeline.append({"stage": name, "index": index + 1, "state": state, "date": actual, "planned": planned})
+            state_class = "not-started"
+        timeline.append({
+            "stage": name,
+            "index": index + 1,
+            "state": state,
+            "state_class": state_class,
+            "completed": completed,
+            "actual_editable": index <= current,
+            **{column.lower().replace(" ", "_"): value for column, value in values.items()},
+        })
     return timeline
 
 
-def stamp_lifecycle(book, sr_no, stage):
-    """Fill in actual dates for every stage the project has already reached."""
-    frame = book.get(SHEET_LIFECYCLE)
-    if frame is None or not len(frame) or stage not in STAGES:
-        return
-    reached = STAGES[: STAGES.index(stage) + 1]
-    keys = pd.to_numeric(frame[KEY], errors="coerce")
-    today = pd.Timestamp.today().normalize()
-    for index in frame.index[(keys == sr_no) & frame["Stage"].astype(str).str.strip().isin(reached)]:
-        if pd.isna(pd.to_datetime(frame.at[index, "Date"], errors="coerce")):
-            frame.at[index, "Date"] = today
-    book[SHEET_LIFECYCLE] = frame
+def replace_lifecycle_dates(book, sr_no, phases):
+    frame = normalize_lifecycle_frame(book.get(SHEET_LIFECYCLE, pd.DataFrame(columns=LIFECYCLE_COLUMNS)))
+    frame = frame[frame[KEY] != sr_no]
+    rows = [
+        {KEY: sr_no, "Stage": stage, **{column: coerce_value("Quotation Date", dates.get(column, "")) for column in LIFECYCLE_DATE_COLUMNS}}
+        for stage, dates in phases.items()
+    ]
+    book[SHEET_LIFECYCLE] = pd.concat([frame, pd.DataFrame(rows, columns=LIFECYCLE_COLUMNS)], ignore_index=True)
 
 
-def set_lifecycle_date(book, sr_no, stage, value):
-    if stage not in STAGES or not str(value or "").strip():
-        return
-    date_value = coerce_value("Quotation Date", value)
-    frame = book.get(SHEET_LIFECYCLE, pd.DataFrame(columns=[KEY, "Stage", "Date", "Planned Date"]))
-    for column in [KEY, "Stage", "Date", "Planned Date"]:
-        if column not in frame.columns:
-            frame[column] = pd.NaT if column in ["Date", "Planned Date"] else ""
-    keys = pd.to_numeric(frame[KEY], errors="coerce")
-    stages = frame["Stage"].astype(str).str.strip()
-    target = frame.index[(keys == sr_no) & (stages == stage)]
-    if target.empty:
-        frame = pd.concat([frame, pd.DataFrame([{KEY: sr_no, "Stage": stage, "Date": date_value, "Planned Date": pd.NaT}])], ignore_index=True)
-    else:
-        frame.at[target[0], "Date"] = date_value
-    book[SHEET_LIFECYCLE] = frame
+def lifecycle_date_error(book, sr_no):
+    frame = normalize_lifecycle_frame(book.get(SHEET_LIFECYCLE, pd.DataFrame(columns=LIFECYCLE_COLUMNS)))
+    rows = frame[frame[KEY] == sr_no]
+    dates = {str(row["Stage"]).strip(): row for _, row in rows.iterrows()}
+    today = pd.Timestamp.now().normalize()
+
+    for stage in STAGES:
+        row = dates.get(stage)
+        if row is None:
+            continue
+        for start_column, end_column, label in [
+            ("Planned Start", "Planned End", "planned"),
+            ("Actual Start", "Actual End", "actual"),
+        ]:
+            start = row[start_column]
+            end = row[end_column]
+            if not pd.isna(start) and not pd.isna(end) and end < start:
+                return f"{stage} {label} end date cannot be before its start date."
+        for column in ["Actual Start", "Actual End"]:
+            value = row[column]
+            if not pd.isna(value) and value.normalize() > today:
+                return f"{stage} {column.lower()} cannot be in the future."
+
+    for previous_stage, next_stage in zip(STAGES, STAGES[1:]):
+        previous = dates.get(previous_stage)
+        following = dates.get(next_stage)
+        if previous is None or following is None:
+            continue
+        previous_planned_end = previous["Planned End"]
+        next_planned_start = following["Planned Start"]
+        if not pd.isna(previous_planned_end) and not pd.isna(next_planned_start) and next_planned_start < previous_planned_end:
+            return f"{next_stage} planned start cannot be before {previous_stage}'s planned end."
+        previous_end = previous["Actual End"]
+        next_start = following["Actual Start"]
+        if not pd.isna(previous_end) and not pd.isna(next_start) and next_start < previous_end:
+            return f"{next_stage} actual start cannot be before {previous_stage}'s actual end."
+    return None
 
 
 def comments_for(book, sr_no):
@@ -461,6 +554,7 @@ def dashboard():
         add_project_custodians=user_custodians(),
         custodians=custodians,
         stages=STAGES,
+        stage_descriptions=STAGE_DESCRIPTIONS,
     )
 
 
@@ -480,12 +574,13 @@ def project_detail(sr_no):
         timeline=lifecycle_for(book, sr_no, project["Planning Status"]),
         comments=comments_for(book, sr_no),
         stages=STAGES,
+        stage_descriptions=STAGE_DESCRIPTIONS,
         ordering_options=ORDERING_OPTIONS,
         fulfillment_options=FULFILLMENT_OPTIONS,
         status_options=STATUS_OPTIONS,
         multiple_rows=multiple_for(book, sr_no),
         attachments=attachments_for(book, sr_no),
-        multiple_columns=MULTIPLE_COLUMNS[1:],
+        multiple_columns=[column for column in MULTIPLE_COLUMNS[1:] if column != "MI No."],
         numeric_columns=NUMERIC_COLUMNS,
         date_columns=DATE_COLUMNS,
         readonly_columns=READONLY_COLUMNS,
@@ -497,15 +592,24 @@ def project_detail(sr_no):
 def update_project(sr_no):
     payload = request.get_json(silent=True) or {}
     changes = payload.get("fields", {})
-    lifecycle_dates = payload.get("lifecycle_dates", {})
     if not isinstance(changes, dict):
         return jsonify(error="Invalid payload."), 400
-    if not isinstance(lifecycle_dates, dict):
-        return jsonify(error="Invalid lifecycle date payload."), 400
 
     with workbook_lock:
         book = read_all()
-        frame = load_projects()
+        frame = load_projects(book)
+        numeric_columns = [
+            "BP-26 INR",
+            "Approved Budget",
+            "Ordered",
+            "Quotation Value",
+            "PO Value (MINR)",
+            "Actual Fulfillment Value",
+            "Balance",
+            "Saving",]
+        for column in numeric_columns:
+            if column in frame.columns:
+                frame[column] = pd.to_numeric(frame[column],errors="coerce").fillna(0.0).astype("float64")
         target = frame.index[frame[KEY] == sr_no]
         if target.empty:
             return jsonify(error="Project not found."), 404
@@ -513,6 +617,8 @@ def update_project(sr_no):
         user = current_user()
         if user["role"] != "admin" and frame.at[index, "Custodian"].casefold() != user["custodian"].casefold():
             return jsonify(error="You can only edit your own projects."), 403
+        if "Planning Status" in changes and changes["Planning Status"] != frame.at[index, "Planning Status"]:
+            return jsonify(error="Project phase advances when its actual dates are completed."), 400
 
         for column, value in changes.items():
             if column not in COLUMNS or column in READONLY_COLUMNS:
@@ -535,11 +641,66 @@ def update_project(sr_no):
         )
 
         book[SHEET_PROJECTS] = frame
-        stamp_lifecycle(book, sr_no, frame.at[index, "Planning Status"])
-        set_lifecycle_date(book, sr_no, lifecycle_dates.get("previous_stage"), lifecycle_dates.get("previous_closed_date"))
-        set_lifecycle_date(book, sr_no, lifecycle_dates.get("current_stage"), lifecycle_dates.get("current_start_date"))
         write_all(book)
         updated = project_json(frame.loc[index])
+        timeline = lifecycle_for(book, sr_no, updated["Planning Status"])
+    return jsonify(ok=True, project=updated, timeline=timeline, saved_at=datetime.now().strftime("%d-%b-%Y %H:%M"))
+
+
+@app.put("/api/projects/<int:sr_no>/lifecycle")
+@login_required
+def update_lifecycle(sr_no):
+    payload = request.get_json(silent=True) or {}
+    stage = payload.get("stage")
+    phases = payload.get("phases")
+    field_columns = {
+        "planned_start": "Planned Start",
+        "planned_end": "Planned End",
+        "actual_start": "Actual Start",
+        "actual_end": "Actual End",
+    }
+    if stage not in STAGES or not isinstance(phases, dict):
+        return jsonify(error="Invalid lifecycle payload."), 400
+    stage_index = STAGES.index(stage)
+    expected = STAGES[:stage_index + 1]
+    if set(phases) != set(expected) or not all(
+        isinstance(phases[name], dict) and set(phases[name]).issubset(field_columns) for name in expected
+    ):
+        return jsonify(error="Provide dates for each phase up to the selected lifecycle phase."), 400
+
+    phase_dates = {}
+    for index, name in enumerate(expected):
+        dates = {column: str(phases[name].get(field) or "").strip() for field, column in field_columns.items()}
+        required = ["Planned Start", "Planned End"] + (["Actual Start", "Actual End"] if index < stage_index else [])
+        missing = [column for column in required if not dates[column]]
+        if missing:
+            return jsonify(error=f"{name}: {', '.join(missing).lower()} required."), 400
+        phase_dates[name] = dates
+
+    with workbook_lock:
+        book = read_all()
+        projects = load_projects(book)
+        target = projects.index[projects[KEY] == sr_no]
+        if target.empty:
+            return jsonify(error="Project not found."), 404
+        project = projects.loc[target[0]]
+        user = current_user()
+        if user["role"] != "admin" and project["Custodian"].casefold() != user["custodian"].casefold():
+            return jsonify(error="You can only edit your own projects."), 403
+
+        try:
+            replace_lifecycle_dates(book, sr_no, phase_dates)
+        except ValueError as error:
+            return jsonify(error=str(error)), 400
+
+        date_error = lifecycle_date_error(book, sr_no)
+        if date_error:
+            return jsonify(error=date_error), 400
+
+        projects.at[target[0], "Planning Status"] = stage
+        book[SHEET_PROJECTS] = projects
+        write_all(book)
+        updated = project_json(projects.loc[target[0]])
         timeline = lifecycle_for(book, sr_no, updated["Planning Status"])
     return jsonify(ok=True, project=updated, timeline=timeline, saved_at=datetime.now().strftime("%d-%b-%Y %H:%M"))
 
@@ -554,7 +715,7 @@ def save_multiple(sr_no):
 
     with workbook_lock:
         book = read_all()
-        projects = load_projects()
+        projects = load_projects(book, aggregate_multiple=False)
         match = projects.index[projects[KEY] == sr_no]
         if match.empty:
             return jsonify(error="Project not found."), 404
@@ -587,6 +748,10 @@ def save_multiple(sr_no):
         if saved_rows:
             multiple = pd.concat([multiple, pd.DataFrame(saved_rows, columns=MULTIPLE_COLUMNS)], ignore_index=True)
         book[SHEET_MULTIPLE] = multiple
+        project_index = projects.index[projects[KEY] == sr_no][0]
+        for column in ["PO Value (MINR)", "Actual Fulfillment Value"]:
+            projects.at[project_index, column] = sum(float(row[column] or 0) for row in saved_rows)
+        book[SHEET_PROJECTS] = projects
         write_all(book)
         records = multiple_for(book, sr_no)
     return jsonify(ok=True, rows=records, saved_at=datetime.now().strftime("%d-%b-%Y %H:%M"))
@@ -701,12 +866,44 @@ def delete_comment(sr_no, comment_id):
 @app.get("/export")
 @login_required
 def export_projects():
-    frame = visible_projects(load_projects()).copy()
+    book = read_all()
+    frame = visible_projects(load_projects(book)).copy()
+    names = frame.groupby(KEY)["Project/Equipment/Investment"].agg(
+        lambda values: values.iloc[0] if values.nunique() == 1 else "AMBIGUOUS: duplicate project ID"
+    )
+    visible = frame[KEY]
+    frame = frame[[
+        KEY,
+        "Project/Equipment/Investment",
+        "Custodian",
+        "Approved Budget",
+        "Ordered",
+        "Actual Fulfillment Value",
+        "Balance",
+        "PO Value (MINR)",
+        "Planning Status",
+    ]]
+
+    multiple = normalize_multiple_frame(book.get(SHEET_MULTIPLE, pd.DataFrame(columns=MULTIPLE_COLUMNS)))
+    multiple = multiple[multiple[KEY].isin(visible)].copy()
     for column in DATE_COLUMNS:
-        frame[column] = frame[column].map(as_date_text)
+        if column in multiple.columns:
+            multiple[column] = multiple[column].map(as_date_text)
+    multiple.insert(1, "Project/Equipment/Investment", multiple[KEY].map(names))
+
+    lifecycle = normalize_lifecycle_frame(book.get(SHEET_LIFECYCLE, pd.DataFrame(columns=LIFECYCLE_COLUMNS)))
+    lifecycle = lifecycle[lifecycle[KEY].isin(visible)].copy()
+    lifecycle["_order"] = lifecycle["Stage"].map({stage: index for index, stage in enumerate(STAGES)})
+    lifecycle = lifecycle.sort_values([KEY, "_order"]).drop(columns="_order")
+    for column in LIFECYCLE_DATE_COLUMNS:
+        lifecycle[column] = lifecycle[column].map(as_date_text)
+    lifecycle.insert(1, "Project/Equipment/Investment", lifecycle[KEY].map(names))
+
     stream = BytesIO()
     with pd.ExcelWriter(stream, engine="openpyxl") as writer:
         frame.to_excel(writer, sheet_name=SHEET_PROJECTS, index=False)
+        multiple.to_excel(writer, sheet_name="PO Details", index=False)
+        lifecycle.to_excel(writer, sheet_name=SHEET_LIFECYCLE, index=False)
     stream.seek(0)
     return send_file(
         stream,

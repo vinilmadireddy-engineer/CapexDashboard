@@ -62,7 +62,7 @@ html, body { height: 100%; }
 
 /* Money cards */
 .money-row { background: #fff; border: 1px solid var(--line); border-radius: 10px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: .9rem; }
-.money-card { border-right: 1px solid var(--line); padding: .8rem 1.1rem; }
+.money-card { border-right: 1px solid var(--line); padding: .8rem .75rem; }
 .money-card:last-child { border-right: 0; }
 .money-card span { color: var(--muted); display: block; font-size: .74rem; }
 .money-card strong { font-size: 1.2rem; font-weight: 700; }
@@ -118,26 +118,34 @@ html, body { height: 100%; }
 
 /* Lifecycle */
 .lifecycle { display: flex; gap: 0; list-style: none; margin: 0; padding: 0; }
-.lifecycle-step { border: 1px solid var(--line); border-radius: 10px; flex: 1; margin-right: 1.6rem; padding: .7rem .8rem; position: relative; }
-.lifecycle-step:last-child { margin-right: 0; }
+.lifecycle-item { flex: 1; margin-right: 1.6rem; position: relative; }
+.lifecycle-item:last-child { margin-right: 0; }
+.lifecycle-step { background: #fff; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); padding: .7rem .8rem; position: relative; text-align: left; width: 100%; }
 .lifecycle-step::after { border-top: 2px dashed #cbd5e1; content: ""; left: 100%; position: absolute; top: 50%; width: 1.6rem; }
-.lifecycle-step:last-child::after { display: none; }
+.lifecycle-item:last-child .lifecycle-step::after { display: none; }
 .lifecycle-step.state-completed { background: #f0fdf4; border-color: #86efac; }
 .lifecycle-step.state-completed::after { border-top: 2px solid var(--green); }
 .lifecycle-step.state-in-progress { background: #fffbeb; border-color: #fcd34d; }
+.lifecycle-step.state-delayed { background: #fff7ed; border-color: #fdba74; }
 .step-mark { color: #cbd5e1; float: right; font-size: 1rem; }
 .state-completed .step-mark { color: var(--green); }
 .state-in-progress .step-mark { color: var(--amber); }
+.state-delayed .step-mark, .state-delayed .step-state { color: #b45309; }
 .step-name { display: block; font-size: .84rem; font-weight: 600; }
 .step-state { color: var(--muted); display: block; font-size: .75rem; margin: .2rem 0; }
 .state-completed .step-state { color: var(--green); }
 .state-in-progress .step-state { color: #b45309; }
-.step-date { color: var(--muted); display: block; font-size: .72rem; }
-.lifecycle-date-panel { border-top: 1px solid var(--line); display: grid; gap: .8rem; grid-template-columns: repeat(2, minmax(0, 220px)); margin-top: .9rem; padding-top: .9rem; }
-.lifecycle-date-panel[hidden] { display: none; }
-.lifecycle-date-panel label { color: var(--muted); display: flex; flex-direction: column; font-size: .74rem; gap: .25rem; }
-.lifecycle-date-panel input { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font-size: .82rem; padding: .35rem .45rem; }
-.lifecycle-date-panel input:focus { border-color: var(--blue); outline: 0; }
+.step-date { color: var(--muted); display: grid; font-size: .72rem; gap: .16rem; }
+.lifecycle-dialog { max-width: 920px; }
+.lifecycle-stage-field { color: var(--muted); display: flex; flex-direction: column; font-size: .75rem; gap: .25rem; margin-bottom: .9rem; max-width: 280px; }
+.lifecycle-stage-field select, .lifecycle-matrix input { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font-size: .82rem; padding: .4rem .5rem; }
+.lifecycle-stage-field select:focus, .lifecycle-matrix input:focus { border-color: var(--blue); outline: 0; }
+.lifecycle-matrix { border-collapse: collapse; width: 100%; }
+.lifecycle-matrix th, .lifecycle-matrix td { border-bottom: 1px solid var(--line); padding: .5rem; text-align: left; white-space: nowrap; }
+.lifecycle-matrix thead th { background: #f8fafc; color: #475569; font-size: .72rem; font-weight: 600; }
+.lifecycle-matrix tbody th { font-size: .82rem; }
+.lifecycle-matrix input { min-width: 140px; width: 100%; }
+.lifecycle-dialog .modal-actions { margin-top: .5rem; }
 
 /* Info grid + edit mode */
 .panel-head { align-items: center; display: flex; justify-content: space-between; margin-bottom: .8rem; }
@@ -155,6 +163,7 @@ html, body { height: 100%; }
 }
 .is-editing .btn-save, .is-editing .btn-cancel { display: inline-block; }
 .is-editing .btn-edit { display: none; }
+.is-editing .btn-lifecycle { display: inline-block; }
 .info-grid { display: grid; gap: 1.2rem; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .info-column { display: flex; flex-direction: column; gap: .55rem; }
 .info-item { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; align-items: center; }
@@ -217,21 +226,28 @@ html, body { height: 100%; }
   .multiple-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 1200px) {
+  .money-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .money-card { border-bottom: 1px solid var(--line); }
+  .money-card:nth-child(3n) { border-right: 0; }
+  .money-card:nth-last-child(-n+2) { border-bottom: 0; }
   .detail-grid { grid-template-columns: minmax(0, 1fr); }
   .summary-panel { grid-template-columns: 56px minmax(0, 1fr); }
   .summary-status { border-left: 0; padding-left: 0; text-align: left; }
   .lifecycle { flex-wrap: wrap; gap: .8rem; }
-  .lifecycle-step { flex: 1 1 180px; margin-right: 0; }
+  .lifecycle-item { flex: 1 1 180px; margin-right: 0; }
   .lifecycle-step::after { display: none; }
 }
 @media (max-width: 900px) {
   .capex-sidebar { flex: 0 0 64px; }
   .capex-sidebar .brand span, .side-nav span, .side-user div, .btn-signout span { display: none; }
   .money-row, .stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .money-card:nth-child(3n) { border-right: 1px solid var(--line); }
+  .money-card:nth-child(2n) { border-right: 0; }
+  .money-card:nth-last-child(-n+3) { border-bottom: 1px solid var(--line); }
+  .money-card:nth-last-child(-n+2) { border-bottom: 0; }
   .info-grid { grid-template-columns: minmax(0, 1fr); }
   .multiple-grid { grid-template-columns: minmax(0, 1fr); }
   .detail-heading, .detail-heading .edit-actions { align-items: flex-start; flex-direction: column; }
-  .lifecycle-date-panel { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Login page */

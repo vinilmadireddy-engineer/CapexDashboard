@@ -17,19 +17,27 @@
   const attachmentInput = document.getElementById("attachmentInput");
   const attachmentList = document.getElementById("attachmentList");
   const attachmentNote = document.getElementById("attachmentNote");
-  const lifecycleDatePanel = document.getElementById("lifecycleDatePanel");
-  const previousStageLabel = document.getElementById("previousStageLabel");
-  const previousClosedDate = document.getElementById("previousClosedDate");
-  const currentStageLabel = document.getElementById("currentStageLabel");
-  const currentStartDate = document.getElementById("currentStartDate");
+  const lifecycleModal = document.getElementById("lifecycleModal");
+  const updateLifecycleButton = document.getElementById("updateLifecycleButton");
+  const lifecycleStageSelect = document.getElementById("lifecycleStageSelect");
+  const lifecycleMatrixRows = document.getElementById("lifecycleMatrixRows");
+  const lifecycleNote = document.getElementById("lifecycleNote");
+  const saveLifecycleButton = document.getElementById("saveLifecycleButton");
+  const LIFECYCLE_FIELDS = ["planned_start", "planned_end", "actual_start", "actual_end"];
+  const LIFECYCLE_LABELS = {
+    planned_start: "planned start",
+    planned_end: "planned end",
+    actual_start: "actual start",
+    actual_end: "actual end",
+  };
 
   const inputs = [...main.querySelectorAll('[data-role="input"]')];
   const NUMERIC = new Set(["BP-26 INR", "Approved Budget", "Ordered", "Quotation Value", "PO Value (MINR)", "Actual Fulfillment Value"]);
   const DATE = new Set(["Quotation Date", "Material Delivery plan date", "Material Delivery Actual date", "Execution Start", "Execution End", "Commitment to EM"]);
-  const STAGES = ["Initiation", "Planning", "Execution", "Monitoring", "Closure"];
+   const STAGES = ["Initiation", "Planning", "Execution", "Monitoring", "Closure"];
+   const STAGE_DESCRIPTIONS = JSON.parse(document.getElementById("stageDescriptions").textContent || "{}");
   const multipleColumns = JSON.parse(document.getElementById("multipleColumns")?.textContent || "[]");
   const multipleOptions = window.CAPEX_DETAIL_OPTIONS || {};
-  const statusInput = main.querySelector('[name="Planning Status"]');
   const slug = (value) => String(value || "").toLowerCase().replace(/\s+/g, "-");
 
   let snapshot = captureValues();
@@ -42,7 +50,6 @@
 
   function setEditing(on) {
     main.classList.toggle("is-editing", on);
-    updateLifecycleDatePanel();
     if (on) inputs[0]?.focus();
   }
 
@@ -88,61 +95,186 @@
     timeline.forEach((step, index) => {
       const node = steps[index];
       if (!node) return;
-      node.className = `lifecycle-step state-${slug(step.state)}`;
+      node.className = `lifecycle-step state-${step.state_class}`;
+      node.dataset.stage = step.stage;
+      node.dataset.completed = String(step.completed);
+      node.dataset.plannedStart = step.planned_start || "";
+      node.dataset.plannedEnd = step.planned_end || "";
+      node.dataset.actualStart = step.actual_start || "";
+      node.dataset.actualEnd = step.actual_end || "";
       node.querySelector(".step-mark").innerHTML =
-        step.state === "Completed" ? '<i class="bi bi-check-circle-fill"></i>' : '<i class="bi bi-circle"></i>';
+        step.completed ? '<i class="bi bi-check-circle-fill"></i>' : '<i class="bi bi-circle"></i>';
       node.querySelector(".step-state").textContent = step.state;
-      node.querySelector(".step-date").textContent =
-        step.state === "Completed" ? (step.date || step.planned)
-          : step.state === "In Progress" ? `Start: ${step.date || step.planned}`
-            : `Planned Start: ${step.planned || "–"}`;
+      const dateNode = node.querySelector(".step-date");
+      dateNode.replaceChildren();
+      if (step.completed) {
+        [["Planned start", step.planned_start], ["Planned end", step.planned_end],
+          ["Actual start", step.actual_start], ["Actual end", step.actual_end]].forEach(([label, value]) => {
+          const date = document.createElement("span");
+          date.textContent = `${label}: ${value || "–"}`;
+          dateNode.append(date);
+        });
+      }
     });
   }
 
-  function updateLifecycleDatePanel() {
-    if (!lifecycleDatePanel || !statusInput) return;
-    const oldStage = snapshot["Planning Status"];
-    const newStage = statusInput.value;
-    const statusChanged = main.classList.contains("is-editing") && oldStage && newStage && oldStage !== newStage;
-    lifecycleDatePanel.hidden = !statusChanged;
-    if (!statusChanged) return;
-    previousStageLabel.textContent = `${oldStage} Closed Date`;
-    currentStageLabel.textContent = `${newStage} Start Date`;
-    if (!previousClosedDate.value) previousClosedDate.valueAsDate = new Date();
-    if (!currentStartDate.value) currentStartDate.valueAsDate = new Date();
+  function localDateText(date = new Date()) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   }
 
-  function lifecycleDatePayload(fields) {
-    if (!fields["Planning Status"]) return null;
-    const previousStage = snapshot["Planning Status"];
-    const currentStage = fields["Planning Status"];
-    if (!STAGES.includes(previousStage) || !STAGES.includes(currentStage) || previousStage === currentStage) return null;
+  function lifecycleNoteText(message, kind) {
+    lifecycleNote.textContent = message;
+    lifecycleNote.className = `save-note ${kind || ""}`.trim();
+  }
+
+  function savedPhaseDates(stage) {
+    const step = main.querySelector(`.lifecycle-step[data-stage="${stage}"]`);
     return {
-      previous_stage: previousStage,
-      previous_closed_date: previousClosedDate.value,
-      current_stage: currentStage,
-      current_start_date: currentStartDate.value,
+      planned_start: step?.dataset.plannedStart || "",
+      planned_end: step?.dataset.plannedEnd || "",
+      actual_start: step?.dataset.actualStart || "",
+      actual_end: step?.dataset.actualEnd || "",
     };
   }
+
+  function renderLifecycleMatrix() {
+    const typed = Object.fromEntries([...lifecycleMatrixRows.querySelectorAll("input")].map((input) => [`${input.dataset.stage}|${input.dataset.field}`, input.value]));
+    const selectedIndex = STAGES.indexOf(lifecycleStageSelect.value);
+    const today = localDateText();
+    lifecycleMatrixRows.replaceChildren();
+    STAGES.slice(0, selectedIndex + 1).forEach((stage) => {
+      const saved = savedPhaseDates(stage);
+      const row = document.createElement("tr");
+      const name = document.createElement("th");
+      name.scope = "row";
+      name.textContent = `HG${STAGES.indexOf(stage) + 1}.${stage}`;
+      name.title = STAGE_DESCRIPTIONS[stage] || "";
+      row.append(name);
+      LIFECYCLE_FIELDS.forEach((field) => {
+        const cell = document.createElement("td");
+        const input = document.createElement("input");
+        input.type = "date";
+        input.dataset.stage = stage;
+        input.dataset.field = field;
+        input.value = typed[`${stage}|${field}`] ?? saved[field];
+        input.setAttribute("aria-label", `${stage} ${LIFECYCLE_LABELS[field]} date`);
+        if (field.startsWith("actual_")) input.max = today;
+        cell.append(input);
+        row.append(cell);
+      });
+      lifecycleMatrixRows.append(row);
+    });
+  }
+
+  function lifecycleValues() {
+    const phases = {};
+    lifecycleMatrixRows.querySelectorAll("input").forEach((input) => {
+      phases[input.dataset.stage] ||= {};
+      phases[input.dataset.stage][input.dataset.field] = input.value;
+    });
+    return phases;
+  }
+
+  function validateLifecycle(stage, phases) {
+    const selectedIndex = STAGES.indexOf(stage);
+    const today = localDateText();
+    const stages = STAGES.slice(0, selectedIndex + 1);
+    stages.forEach((name, index) => {
+      const values = phases[name];
+      const required = index < selectedIndex ? LIFECYCLE_FIELDS : ["planned_start", "planned_end"];
+      const missing = required.filter((field) => !values[field]);
+      if (missing.length) throw new Error(`${name}: ${missing.map((field) => LIFECYCLE_LABELS[field]).join(", ")} required.`);
+      if (values.planned_end < values.planned_start) throw new Error(`${name} planned end date cannot be before planned start date.`);
+      if (values.actual_start && values.actual_end && values.actual_end < values.actual_start) {
+        throw new Error(`${name} actual end date cannot be before actual start date.`);
+      }
+      if ([values.actual_start, values.actual_end].some((date) => date && date > today)) {
+        throw new Error(`${name} actual dates cannot be in the future.`);
+      }
+    });
+    stages.slice(1).forEach((name, index) => {
+      const previousName = stages[index];
+      const previous = phases[previousName];
+      const current = phases[name];
+      if (current.planned_start < previous.planned_end) {
+        throw new Error(`${name} planned start cannot be before ${previousName}'s planned end.`);
+      }
+      if (current.actual_start && previous.actual_end && current.actual_start < previous.actual_end) {
+        throw new Error(`${name} actual start cannot be before ${previousName}'s actual end.`);
+      }
+    });
+  }
+
+  function openLifecycleModal() {
+    lifecycleStageSelect.value = main.querySelector('[data-role="stage-badge"]').textContent.trim();
+    lifecycleMatrixRows.replaceChildren();
+    renderLifecycleMatrix();
+    lifecycleNoteText("");
+    lifecycleModal.hidden = false;
+    lifecycleStageSelect.focus();
+  }
+
+  function closeLifecycleModal() {
+    lifecycleModal.hidden = true;
+    updateLifecycleButton.focus();
+  }
+
+  updateLifecycleButton.addEventListener("click", openLifecycleModal);
+  lifecycleStageSelect.addEventListener("change", () => {
+    renderLifecycleMatrix();
+    lifecycleNoteText("");
+  });
+  document.getElementById("closeLifecycleModal").addEventListener("click", closeLifecycleModal);
+  document.getElementById("cancelLifecycleModal").addEventListener("click", closeLifecycleModal);
+  lifecycleModal.addEventListener("click", (event) => {
+    if (event.target === lifecycleModal) closeLifecycleModal();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !lifecycleModal.hidden) closeLifecycleModal();
+  });
+
+  saveLifecycleButton.addEventListener("click", async () => {
+    const stage = lifecycleStageSelect.value;
+    const phases = lifecycleValues();
+    try {
+      validateLifecycle(stage, phases);
+    } catch (error) {
+      lifecycleNoteText(error.message, "error");
+      return;
+    }
+    saveLifecycleButton.disabled = true;
+    lifecycleNoteText("Saving...");
+    try {
+      const result = await request(`/api/projects/${srNo}/lifecycle`, {
+        method: "PUT",
+        body: JSON.stringify({ stage, phases }),
+      });
+      paint(result.project);
+      paintTimeline(result.timeline);
+      lifecycleNoteText(`Saved to Excel at ${result.saved_at}.`, "ok");
+      closeLifecycleModal();
+    } catch (error) {
+      lifecycleNoteText(error.message, "error");
+    } finally {
+      saveLifecycleButton.disabled = false;
+    }
+  });
 
   if (editButton && saveButton && cancelButton) {
     editButton.addEventListener("click", () => {
       snapshot = captureValues();
       note("");
-      previousClosedDate.value = "";
-      currentStartDate.value = "";
       setEditing(true);
     });
 
     cancelButton.addEventListener("click", () => {
       inputs.forEach((input) => { input.value = snapshot[input.name]; });
       note("");
-      previousClosedDate.value = "";
-      currentStartDate.value = "";
       setEditing(false);
     });
-
-    statusInput?.addEventListener("change", updateLifecycleDatePanel);
 
     saveButton.addEventListener("click", async () => {
       const fields = {};
@@ -157,16 +289,13 @@
       saveButton.disabled = true;
       note("Saving...");
       try {
-        const lifecycleDates = lifecycleDatePayload(fields);
         const result = await request(`/api/projects/${srNo}`, {
           method: "PUT",
-          body: JSON.stringify({ fields, lifecycle_dates: lifecycleDates || {} }),
+          body: JSON.stringify({ fields }),
         });
         paint(result.project);
         paintTimeline(result.timeline);
         snapshot = captureValues();
-        previousClosedDate.value = "";
-        currentStartDate.value = "";
         setEditing(false);
         note(`Saved to Excel at ${result.saved_at}.`, "ok");
       } catch (error) {

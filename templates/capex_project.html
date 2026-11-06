@@ -10,7 +10,7 @@
 </head>
 <body class="capex-body">
 {% set groups = [
-  ['Quotation Date', 'Quotation Value', 'Sourcing Request No.', 'RBGA Work-on No. for Budget', 'MI No.'],
+  ['Quotation Date', 'Quotation Value', 'Sourcing Request No.', 'RBGA Work-on No. for Budget'],
   ['PO No.', 'PO Value (MINR)', 'Vendor', 'Vendor Code', 'Material Delivery plan date'],
   ['Material Delivery Actual date', 'Execution Start', 'Execution End', 'Actual Fulfillment Value', 'Ordering'],
   ['Fullfillment', 'Commitment to EM', 'Status', 'Remarks']
@@ -68,11 +68,6 @@
                 <input class="info-input" data-role="input" name="Custodian" value="{{ project['Custodian'] }}" aria-label="Custodian">
               </div>
               <div class="metric">
-                <span>BP-26 INR (MINR)</span>
-                <strong data-money="BP-26 INR">₹ {{ '%.2f'|format(project['BP-26 INR']) }}</strong>
-                <input class="info-input" data-role="input" type="number" step="0.01" name="BP-26 INR" value="{{ '%.2f'|format(project['BP-26 INR']) }}" aria-label="BP-26 INR">
-              </div>
-              <div class="metric">
                 <span>Approved Budget (MINR)</span>
                 <strong data-money="Approved Budget">₹ {{ '%.2f'|format(project['Approved Budget']) }}</strong>
                 <input class="info-input" data-role="input" type="number" step="0.01" name="Approved Budget" value="{{ '%.2f'|format(project['Approved Budget']) }}" aria-label="Approved Budget">
@@ -89,42 +84,37 @@
             </div>
           </div>
           <div class="summary-status">
-            <span class="status-caption">Current Status</span>
+            <span class="status-caption">Current Phase</span>
             <span class="badge-status stage-{{ project['Planning Status']|lower }}" data-role="stage-badge">{{ project['Planning Status'] }}</span>
-            <select class="info-input" data-role="input" name="Planning Status" aria-label="Planning Status">
-              {% for stage in stages %}<option value="{{ stage }}" {{ 'selected' if stage == project['Planning Status'] }}>{{ stage }}</option>{% endfor %}
-            </select>
             <span class="status-caption mt">Saving (MINR)</span>
             <strong class="saving-value" data-money="Saving">₹ {{ '%.2f'|format(project['Saving']) }}</strong>
           </div>
         </section>
 
         <section class="panel lifecycle-panel">
-          <h3>Project Management Lifecycle</h3>
-          <ol class="lifecycle" id="lifecycle">
-            {% for step in timeline %}
-            <li class="lifecycle-step state-{{ step.state|lower|replace(' ', '-') }}">
-              <span class="step-mark">
-                {% if step.state == 'Completed' %}<i class="bi bi-check-circle-fill"></i>{% else %}<i class="bi bi-circle"></i>{% endif %}
-              </span>
-              <span class="step-name">{{ step.index }}. {{ step.stage }}</span>
-              <span class="step-state">{{ step.state }}</span>
-              <span class="step-date">
-                {%- if step.state == 'Completed' -%}{{ step.date or step.planned }}
-                {%- elif step.state == 'In Progress' -%}Start: {{ step.date or step.planned }}
-                {%- else -%}Planned Start: {{ step.planned or '&ndash;' }}{%- endif -%}
-              </span>
-            </li>
-            {% endfor %}
-          </ol>
-          <div class="lifecycle-date-panel" id="lifecycleDatePanel" hidden>
-            <label><span id="previousStageLabel">Previous State Closed Date</span>
-              <input type="date" id="previousClosedDate">
-            </label>
-            <label><span id="currentStageLabel">Current State Start Date</span>
-              <input type="date" id="currentStartDate">
-            </label>
+          <div class="panel-head">
+            <h3>Project Management Lifecycle</h3>
+            <button class="btn btn-edit btn-lifecycle" type="button" id="updateLifecycleButton"><i class="bi bi-arrow-repeat"></i> Update Lifecycle</button>
           </div>
+          <div class="lifecycle" id="lifecycle" role="list">{% for step in timeline %}
+            <div class="lifecycle-item" role="listitem">
+              <div class="lifecycle-step state-{{ step.state_class }}" data-stage="{{ step.stage }}" data-completed="{{ step.completed|lower }}" data-planned-start="{{ step.planned_start }}" data-planned-end="{{ step.planned_end }}" data-actual-start="{{ step.actual_start }}" data-actual-end="{{ step.actual_end }}">
+                <span class="step-mark">
+                  {% if step.completed %}<i class="bi bi-check-circle-fill"></i>{% else %}<i class="bi bi-circle"></i>{% endif %}
+                </span>
+                <span class="step-name" title="{{ stage_descriptions[step.stage] }}">HG{{ step.index }}.{{ step.stage }}</span>
+                <span class="step-state">{{ step.state }}</span>
+                <span class="step-date">
+                  {% if step.completed %}
+                  <span>Planned start: {{ step.planned_start or '–' }}</span>
+                  <span>Planned end: {{ step.planned_end or '–' }}</span>
+                  <span>Actual start: {{ step.actual_start or '–' }}</span>
+                  <span>Actual end: {{ step.actual_end or '–' }}</span>
+                  {% endif %}
+                </span>
+              </div>
+            </div>
+            {% endfor %}</div>
         </section>
 
         <section class="panel info-panel">
@@ -166,11 +156,45 @@
   </main>
 </div>
 
+<div class="modal-backdrop-custom" id="lifecycleModal" hidden>
+  <section class="add-project-dialog lifecycle-dialog" role="dialog" aria-modal="true" aria-labelledby="lifecycleModalTitle">
+    <div class="modal-head">
+      <h2 id="lifecycleModalTitle">Update Lifecycle</h2>
+      <button type="button" class="btn-icon" id="closeLifecycleModal" aria-label="Close"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <label class="lifecycle-stage-field">Current lifecycle phase
+      <select id="lifecycleStageSelect">
+        {% for step in timeline %}<option value="{{ step.stage }}" title="{{ stage_descriptions[step.stage] }}" {% if step.stage == project['Planning Status'] %}selected{% endif %}>HG{{ step.index }}.{{ step.stage }}</option>{% endfor %}
+      </select>
+    </label>
+    <div class="table-responsive">
+      <table class="lifecycle-matrix">
+        <thead>
+          <tr>
+            <th>Lifecycle phase</th>
+            <th>Planned Start Date</th>
+            <th>Planned End Date</th>
+            <th>Actual Start Date</th>
+            <th>Actual End Date</th>
+          </tr>
+        </thead>
+        <tbody id="lifecycleMatrixRows"></tbody>
+      </table>
+    </div>
+    <p class="save-note" id="lifecycleNote" role="status"></p>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" type="button" id="cancelLifecycleModal">Cancel</button>
+      <button class="btn btn-save" type="button" id="saveLifecycleButton">Save</button>
+    </div>
+  </section>
+</div>
+
 <script id="multipleData" type="application/json">{{ multiple_rows|tojson }}</script>
 <script id="multipleColumns" type="application/json">{{ multiple_columns|tojson }}</script>
 <script id="attachmentData" type="application/json">{{ attachments|tojson }}</script>
 <script id="commentData" type="application/json">{{ comments|tojson }}</script>
 <script id="detailConfig" type="application/json">{{ {'user': user.name, 'is_admin': user.role == 'admin', 'options': {'Ordering': ordering_options, 'Fullfillment': fulfillment_options, 'Status': status_options}}|tojson }}</script>
+<script id="stageDescriptions" type="application/json">{{ stage_descriptions|tojson }}</script>
 <script src="{{ url_for('static', filename='capex-detail.js') }}"></script>
 </body>
 </html>

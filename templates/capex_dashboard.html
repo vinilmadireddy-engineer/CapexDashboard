@@ -43,17 +43,17 @@
       {% for stage in stages %}
       <article class="stat-card">
         <span class="stat-icon icon-{{ stage|lower }}"><i class="bi bi-{{ {'Initiation':'box-seam','Planning':'compass','Execution':'person-gear','Monitoring':'display','Closure':'check-circle'}[stage] }}"></i></span>
-        <div><span class="stat-label">{{ stage }}</span><strong data-stat="{{ stage }}">0</strong></div>
+        <div><span class="stat-label" title="{{ stage_descriptions[stage] }}">{{ stage }}</span><strong data-stat="{{ stage }}">0</strong></div>
       </article>
       {% endfor %}
     </section>
 
     <section class="money-row">
-      <article class="money-card"><span>BP-26 INR (MINR)</span><strong data-money="BP-26 INR">₹ 0.00</strong></article>
       <article class="money-card"><span>Approved Budget (MINR)</span><strong data-money="Approved Budget">₹ 0.00</strong></article>
       <article class="money-card"><span>Ordered (MINR)</span><strong data-money="Ordered">₹ 0.00</strong></article>
-      <article class="money-card"><span>Balance (MINR)</span><strong data-money="Balance">₹ 0.00</strong></article>
-      <article class="money-card saving"><span>Variance (MINR)</span><strong data-money="Saving">₹ 0.00</strong></article>
+      <article class="money-card"><span>Fulfillment (MINR)</span><strong data-money="Actual Fulfillment Value">₹ 0.00</strong></article>
+      <article class="money-card"><span>Ordered Balance (MINR)</span><strong data-money="Balance">₹ 0.00</strong></article>
+      <article class="money-card"><span>Fulfillment Balance (MINR)</span><strong data-money="Fulfillment Balance">₹ 0.00</strong></article>
     </section>
 
     <section class="table-card">
@@ -64,11 +64,10 @@
               <th>Sr.No.</th>
               <th>Project / equipment / investment</th>
               <th>Custodian</th>
-              <th class="num">BP-26 INR (MINR)</th>
               <th class="num">Approved Budget (MINR)</th>
               <th class="num">Ordered (MINR)</th>
+              <th class="num">Fulfillment (MINR)</th>
               <th class="num">Balance (MINR)</th>
-              <th class="num">Variance (MINR)</th>
               <th class="center">Status</th>
               <th class="center">Action</th>
             </tr>
@@ -81,6 +80,8 @@
         <nav class="pager" id="pager" aria-label="Pagination"></nav>
       </div>
     </section>
+    <script id="stageDescriptions" type="application/json">{{ stage_descriptions|tojson }}</script>
+    <script>window.CAPEX_DETAIL_URL = "{{ url_for('project_detail', sr_no=0) }}";</script>
   </main>
 </div>
 
@@ -122,7 +123,7 @@
       <label>Status
         <select name="Planning Status">
           {% for stage in stages %}
-          <option value="{{ stage }}">{{ stage }}</option>
+          <option value="{{ stage }}" title="{{ stage_descriptions[stage] }}">{{ stage }}</option>
           {% endfor %}
         </select>
       </label>

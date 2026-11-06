@@ -3,7 +3,8 @@
 
   const PAGE_SIZE = 5;
   const STAGES = ["Initiation", "Planning", "Execution", "Monitoring", "Closure"];
-  const MONEY_KEYS = ["BP-26 INR", "Approved Budget", "Ordered", "Balance", "Saving"];
+  const MONEY_KEYS = ["Approved Budget", "Ordered", "Actual Fulfillment Value", "Balance", "Fulfillment Balance"];
+   const STAGE_DESCRIPTIONS = JSON.parse(document.getElementById("stageDescriptions").textContent || "{}");
 
   //const projects = JSON.parse(document.getElementById("projectData").textContent || "[]");
   let projects = JSON.parse(document.getElementById("projectData").textContent || "[]");
@@ -44,7 +45,9 @@
       if (node) node.textContent = rows.filter((row) => row["Planning Status"] === stage).length;
     });
     MONEY_KEYS.forEach((key) => {
-      const total = rows.reduce((sum, row) => sum + Number(row[key] || 0), 0);
+      const total = rows.reduce((sum, row) => sum + (key === "Fulfillment Balance"
+        ? Number(row["Ordered"] || 0) - Number(row["Actual Fulfillment Value"] || 0)
+        : Number(row[key] || 0)), 0);
       document.querySelector(`[data-money="${key}"]`).textContent = money(total);
     });
   }
@@ -62,7 +65,7 @@
       const tr = document.createElement("tr");
       tr.className = "empty-row";
       const td = document.createElement("td");
-      td.colSpan = 10;
+      td.colSpan = 9;
       td.textContent = "No projects match the current filters.";
       tr.append(td);
       rowsBody.append(tr);
@@ -74,11 +77,10 @@
         cell(project["Sr.No."], "center"),
         cell(project["Project/Equipment/Investment"]),
         cell(project["Custodian"]),
-        cell(Number(project["BP-26 INR"]).toFixed(2), "num"),
         cell(Number(project["Approved Budget"]).toFixed(2), "num"),
         cell(Number(project["Ordered"]).toFixed(2), "num"),
+        cell(Number(project["Actual Fulfillment Value"] || 0).toFixed(2), "num"),
         cell(Number(project["Balance"]).toFixed(2), "num"),
-        cell(Number(project["Saving"]).toFixed(2), "num saving"),
       );
 
       const statusCell = document.createElement("td");
@@ -86,6 +88,7 @@
       const badge = document.createElement("span");
       badge.className = `badge-status stage-${slug(project["Planning Status"])}`;
       badge.textContent = project["Planning Status"];
+      badge.title = STAGE_DESCRIPTIONS[project["Planning Status"]] || "";
       statusCell.append(badge);
 
       const actionCell = document.createElement("td");
